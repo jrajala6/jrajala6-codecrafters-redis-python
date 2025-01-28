@@ -1,15 +1,32 @@
-import socket  # noqa: F401
+import asyncio
+import time
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 
-def main():
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
-    print("Logs from your program will appear here!")
+class RedisServer:
+    def __init__(self, port=6379, dir_path="", file_name="", master_host="localhost", master_port=6379):
+        self.port = port
+        self.dir_path = dir_path
+        self.file_name = file_name
+        self.master = [master_host, master_port]
+        self.store = {}
+        self.streams = {}
+        self.repl_ports = {}
+        self.replication_id = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+        self.offset = 0
+        self.wait_events = {}
+        self.waiting_clients = {}
 
-    # Uncomment this to pass the first stage
-    #
-    # server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-    # server_socket.accept() # wait for client
+    async def start(self):
+        server = await asyncio.start_server(self.handle_client, "localhost", self.port)
+        logging.info(f"Server started on port {self.port}")
+        await server.serve_forever()
 
+    def handle_client(self, reader, writer):
+        pass
 
 if __name__ == "__main__":
-    main()
+    server = RedisServer(port=6379)
+    asyncio.run(server.start())
