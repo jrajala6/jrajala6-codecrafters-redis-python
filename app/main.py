@@ -35,6 +35,8 @@ class RedisServer:
                 command = data[0].upper()
                 if command == "PING":
                     await self.send_simple_response(writer, "+PONG")
+                if command == "ECHO":
+                    await self.send_string_response(writer, data[1])
 
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
@@ -42,6 +44,11 @@ class RedisServer:
 
     async def send_simple_response(self, writer, message):
         response = f"{message}\r\n".encode()
+        writer.write(response)
+        await writer.drain()
+
+    async def send_string_response(self, writer, message):
+        response = f"${len(message)}\r\n{message}\r\n".encode()
         writer.write(response)
         await writer.drain()
 
@@ -75,6 +82,8 @@ class RedisServer:
         except Exception as e:
             logging.error(f"Failed to decode input: {e}")
             return []
+
+
 
 if __name__ == "__main__":
     server = RedisServer(port=6379)
