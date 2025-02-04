@@ -38,10 +38,13 @@ class RedisServer:
                 if command == "ECHO":
                     await self.send_string_response(writer, data[1])
                 if command == "SET":
-                    self.update_store(data)
+                    expiry = None
+                    if len(data) == 5:
+                        expiry = int(data[4])
+                    self.update_store(data[1], data[2], expiry)
                     await self.send_simple_response(writer, "+OK")
                 elif command == "GET":
-                    await self.handle_get_command(writer, data)
+                    await self.handle_get_command(writer, data[1])
 
 
             except Exception as e:
@@ -90,23 +93,27 @@ class RedisServer:
             logging.error(f"Failed to decode input: {e}")
             return []
 
-    def update_store(self, data):
+    def update_store(self, key, value, expiry):
         """Updates the key-value store."""
         try:
-            value = data[2]
-            self.store[data[1]] = value
+            if expiry is not None:
+                time_limit = expiry / 1000
+                end_time = time.time() + time_limit
+            else:
+                end_time = None
+            self.store[key] = [value, end_time]
         except Exception as e:
             logging.error(f"Failed to update store: {e}")
 
-    async def handle_get_command(self, writer, data):
+    async def handle_get_command(self, writer, key):
         """Handles the GET command."""
-        print(self.store)
-        key = data[1]
-        value = self.store.get(key)
-        if value:
-            await self.send_string_response(writer, value)
-        else:
-            await self.send_simple_response(writer, "$-1")
+        value_info = self.store.get(key)
+        if value_info:
+            value, expiry = value_info
+            if (expiry is not None and time.time() <= expiry) or expiry is None:
+                await self.send_string_response(writer, value_info[0])
+                return
+        await self.send_simple_response(writer, "$-1")
 
 
 if __name__ == "__main__":
