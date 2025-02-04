@@ -37,6 +37,12 @@ class RedisServer:
                     await self.send_simple_response(writer, "+PONG")
                 if command == "ECHO":
                     await self.send_string_response(writer, data[1])
+                if command == "SET":
+                    self.update_store(data)
+                    await self.send_simple_response(writer, "+OK")
+                elif command == "GET":
+                    await self.handle_get_command(writer, data)
+
 
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
@@ -77,12 +83,30 @@ class RedisServer:
                     string_len = int(data[pointer + 1: first_cr])
                     string = data[first_cr + 2: first_cr + 2 + string_len]
                     input_elements.append(string)
-                    pointer += first_cr + 2 + string_len + 2
+                    pointer = first_cr + string_len + 4
+
             return input_elements
         except Exception as e:
             logging.error(f"Failed to decode input: {e}")
             return []
 
+    def update_store(self, data):
+        """Updates the key-value store."""
+        try:
+            value = data[2]
+            self.store[data[1]] = value
+        except Exception as e:
+            logging.error(f"Failed to update store: {e}")
+
+    async def handle_get_command(self, writer, data):
+        """Handles the GET command."""
+        print(self.store)
+        key = data[1]
+        value = self.store.get(key)
+        if value:
+            await self.send_string_response(writer, value)
+        else:
+            await self.send_simple_response(writer, "$-1")
 
 
 if __name__ == "__main__":
