@@ -147,57 +147,76 @@ class RedisServer:
 
     async def parse_rdb_file(self):
         try:
-            with open(Path(self.dir_path) / Path(self.file_name), "rb") as file:
+            with (open(Path(self.dir_path) / Path(self.file_name), "rb") as file):
                 contents = file.read()
                 #find first database section
                 database_start = contents.find(b"\xFE")
-                database_size, int_size = self.size_encoding(contents[database_start+1: database_start+10])
+                database_size, int_size = self.size_encoding(contents, database_start+1)
 
                 hash_table_info_start = contents.find(b"\xFB")
                 db_header_len = 0
-                hash_table_size, int_size = self.size_encoding(contents[hash_table_info_start+1: hash_table_info_start+10])
+                hash_table_size, int_size = self.size_encoding(contents, hash_table_info_start+1)
                 db_header_len += int_size
-                expiry_keys_size, int_size = self.size_encoding(contents[hash_table_info_start+1+int_size: hash_table_info_start+10+int_size])
+                expiry_keys_size, int_size = self.size_encoding(contents, hash_table_info_start+1+int_size)
                 db_header_len += int_size
 
-                keys_count = 0
+
                 index = hash_table_info_start + db_header_len + 1
                 print(contents[index:])
-                while keys_count < hash_table_size and index < len(contents):
-                    index = contents.find(b"\x00", index)
-                    key, key_len = self.string_encoding(contents[index + 1:])
-                    index += key_len
-                    value, value_len = self.string_encoding(contents[index + 1:])
-                    keys_count += 1
-                    self.store[key] = [value, None]
+                num_keys = 0
+
+                def parse_key_value(index):
+                    key_info = self.string_encoding(contents, index + 1)
+                    val_info = self.string_encoding(contents, index + 1 + key_info[1])
+                    return key_info, val_info
+
+
+                while num_keys < hash_table_size and index < len(contents):
+                    if contents[index:index+1] == b'\x00':
+                        key, val = parse_key_value(index)
+                        self.store[key[0]] = [val[0], None]
+                        num_keys += 1
+                        index += val[1] + key[1] + 1
+                    elif contents[index:index+1] in (b'\xFC', b'\xFD'):
+                        timestamp = int.from_bytes(contents[index + 1: index + 9], "little")
+                        if contents[index:index+1] == b'\xFC':
+                            timestamp /= 1000
+                        key, val = parse_key_value(index + 9)
+                        self.store[key[0]] = [val[0], timestamp]
+                        num_keys += 1
+                        index += val[1] + key[1] + 10
+
+
+
+
+
+                print(self.store)
         except OSError:
             pass
 
-    def size_encoding(self, encoding):
-        first_num = encoding[0]
+    def size_encoding(self, contents, index):
+        first_num = contents[index]
         first_two_bits = int((first_num & 0b11000000) >> 6)
         last_six_bits = first_num & 0b00111111
         if first_two_bits == 0b00:
             return last_six_bits, 1
         elif first_two_bits == 0b01:
-            return (last_six_bits << 8) | encoding[1], 2
+            return (last_six_bits << 8) | contents[index + 1], 2
         elif first_two_bits == 0b10:
-            return int.from_bytes(encoding[1:5], "big"), 5
+            return int.from_bytes(contents[index + 1: index + 5], "big"), 5
         elif first_two_bits == 0b11:
-            self.string_encoding(encoding)
+            self.string_encoding(contents, index)
 
-    def string_encoding(self, encoding):
-        first_byte = bytes(encoding[0])
+    def string_encoding(self, contents, index):
+        first_byte = contents[index: index+1]
         if first_byte == b"\xC0":
-            return str(encoding[1]), 2
+            return str(contents[index + 1]), 2
         elif first_byte == b"\xC1":
-            return str(int.from_bytes(encoding[1:3], "little")), 3
+            return str(int.from_bytes(contents[index + 1: index + 3], "little")), 3
         elif first_byte == b"\xC2":
-            return str(int.from_bytes(encoding[1:5], "little")), 5
+            return str(int.from_bytes(contents[index + 1: index + 5], "little")), 5
         else:
-            print(encoding)
-            print(encoding[0])
-            return encoding[1: encoding[0] + 1].decode(), encoding[0] + 1
+            return contents[index + 1: index + contents[index] + 1].decode(), contents[index] + 1
 
 
 
