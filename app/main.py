@@ -94,6 +94,8 @@ class RedisServer:
                         await self.send_string_response(writer, f"role:master\n"
                                                                 f"master_replid:{self.replid}\n"
                                                                 f"master_repl_offset:{self.repl_offset}")
+                elif command == "REPLCONF":
+                    await self.send_simple_response(writer, "+OK")
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
