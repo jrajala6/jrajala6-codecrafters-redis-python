@@ -29,8 +29,8 @@ class RedisServer:
         self.store = {}
         self.streams = {}
         self.repl_ports = {}
-        self.replication_id = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
-        self.offset = 0
+        self.replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
+        self.repl_offset = 0
         self.wait_events = {}
         self.waiting_clients = {}
 
@@ -71,7 +71,9 @@ class RedisServer:
                     if self.master is not None:
                         await self.send_string_response(writer, "role:slave")
                     else:
-                        await self.send_string_response(writer, "role:master")
+                        await self.send_string_response(writer, f"role:master\n"
+                                                                f"master_replid:{self.replid}\n"
+                                                                f"master_repl_offset:{self.repl_offset}")
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
@@ -197,10 +199,6 @@ class RedisServer:
                         self.store[key[0]] = [val[0], timestamp]
                         num_keys += 1
                         index += val[1] + key[1] + 10
-
-
-
-
 
                 print(self.store)
         except OSError:
