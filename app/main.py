@@ -64,6 +64,8 @@ class RedisServer:
                     await self.handle_config_command(writer, data[2])
                 elif command == "KEYS":
                     await self.send_array_response(writer, list(self.store))
+                elif command == "INFO":
+                    await self.send_string_response(writer, "role:master")
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
