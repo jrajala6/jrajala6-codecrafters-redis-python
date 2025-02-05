@@ -17,6 +17,7 @@ class RedisServer:
         self.master = None
         if "--replicaof" in args:
             self.master = args[args.index("--replicaof") + 1].split()
+            self.master[1] = int(self.master[1])
 
         self.dir_path = None
         if "--dir" in args:
@@ -35,9 +36,18 @@ class RedisServer:
         self.waiting_clients = {}
 
     async def start(self):
+        if self.master is not None:
+            await self.send_handshake()
+
         server = await asyncio.start_server(self.handle_client, "localhost", self.port)
         logging.info(f"Server started on port {self.port}")
         await server.serve_forever()
+
+    async def send_handshake(self):
+        # Send PING
+        reader, writer = await asyncio.open_connection(*self.master)
+        await self.send_array_response(writer, ["PING"])
+
 
     async def handle_client(self, reader, writer):
         """Handles communication with a single client."""
