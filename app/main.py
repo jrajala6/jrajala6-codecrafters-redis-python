@@ -9,6 +9,8 @@ logging.basicConfig(level=logging.INFO)
 class RedisServer:
     def __init__(self, port=6379, master_host="localhost", master_port=6379):
         self.port = port
+        self.file_name = None
+        self.dir_path = None
 
         args = sys.argv
         if "--dir" in args:
@@ -32,6 +34,9 @@ class RedisServer:
 
     async def handle_client(self, reader, writer):
         """Handles communication with a single client."""
+        if self.dir_path and self.file_name:
+            await self.parse_rdb_file()
+
         while True:
             try:
                 data = await self.read_client_input(reader)
@@ -54,7 +59,7 @@ class RedisServer:
                 elif command == "CONFIG" and data[1].upper() == "GET":
                     await self.handle_config_command(writer, data[2])
                 elif command == "KEYS":
-                    await self.parse_rdb_file(writer)
+                    await self.send_array_response(writer, list(self.store))
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
@@ -140,7 +145,7 @@ class RedisServer:
         elif parameter == "dbfilename":
             await self.send_array_response(writer, ["dbfilename", self.file_name])
 
-    async def parse_rdb_file(self, writer):
+    async def parse_rdb_file(self):
         try:
             with open(Path(self.dir_path) / Path(self.file_name), "rb") as file:
                 contents = file.read()
@@ -157,18 +162,13 @@ class RedisServer:
 
                 keys_count = 0
                 index = hash_table_info_start + db_header_len + 1
-                rdb_data = {}
                 while keys_count < hash_table_size and index < len(contents):
                     index = contents.find(b"\x00", index)
                     key, key_len = self.string_encoding(contents[index + 1:])
                     index += key_len
                     value, value_len = self.string_encoding(contents[index + 1: index + 10])
                     keys_count += 1
-                    rdb_data[key] = value
-
-            await self.send_array_response(writer, list(rdb_data))
-
-
+                    self.store[key] = [value, None]
         except OSError:
             pass
 
