@@ -2,6 +2,7 @@ import asyncio
 import time
 import logging
 import sys
+from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 
 
@@ -52,6 +53,8 @@ class RedisServer:
                     await self.handle_get_command(writer, data[1])
                 elif command == "CONFIG" and data[1].upper() == "GET":
                     await self.handle_config_command(writer, data[2])
+                elif command == "KEYS":
+                    await self.parse_rdb_file(writer)
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
@@ -136,6 +139,68 @@ class RedisServer:
             await self.send_array_response(writer, ["dir", self.dir_path])
         elif parameter == "dbfilename":
             await self.send_array_response(writer, ["dbfilename", self.file_name])
+
+    async def parse_rdb_file(self, writer):
+        try:
+            with open(Path(self.dir_path) / Path(self.file_name), "rb") as file:
+                contents = file.read()
+                #find first database section
+                database_start = contents.find(b"\xFE")
+                database_size, int_size = self.size_encoding(contents[database_start+1: database_start+10])
+
+                hash_table_info_start = contents.find(b"\xFB")
+                db_header_len = 0
+                hash_table_size, int_size = self.size_encoding(contents[hash_table_info_start+1: hash_table_info_start+10])
+                db_header_len += int_size
+                expiry_keys_size, int_size = self.size_encoding(contents[hash_table_info_start+1+int_size: hash_table_info_start+10+int_size])
+                db_header_len += int_size
+
+                keys_count = 0
+                index = hash_table_info_start + db_header_len + 1
+                rdb_data = {}
+                while keys_count < hash_table_size and index < len(contents):
+                    index = contents.find(b"\x00", index)
+                    key, key_len = self.string_encoding(contents[index + 1:])
+                    index += key_len
+                    value, value_len = self.string_encoding(contents[index + 1: index + 10])
+                    keys_count += 1
+                    rdb_data[key] = value
+
+            await self.send_array_response(writer, list(rdb_data))
+
+
+        except OSError:
+            pass
+
+    def size_encoding(self, encoding):
+        first_num = encoding[0]
+        first_two_bits = int((first_num & 0b11000000) >> 6)
+        last_six_bits = first_num & 0b00111111
+        if first_two_bits == 0b00:
+            return last_six_bits, 1
+        elif first_two_bits == 0b01:
+            return (last_six_bits << 8) | encoding[1], 2
+        elif first_two_bits == 0b10:
+            return int.from_bytes(encoding[1:5], "big"), 5
+        elif first_two_bits == 0b11:
+            self.string_encoding(encoding)
+
+    def string_encoding(self, encoding):
+        first_byte = bytes(encoding[0])
+        if first_byte == b"\xC0":
+            return str(encoding[1]), 2
+        elif first_byte == b"\xC1":
+            return str(int.from_bytes(encoding[1:3], "little")), 3
+        elif first_byte == b"\xC2":
+            return str(int.from_bytes(encoding[1:5], "little")), 5
+        else:
+            return encoding[1: encoding[0] + 1].decode(), encoding[0] + 1
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
