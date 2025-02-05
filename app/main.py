@@ -53,6 +53,8 @@ class RedisServer:
         await self.receive_master_response(reader)
         await self.send_array_response(writer, ["REPLCONF", "capa", "psync2"])
         await self.receive_master_response(reader)
+        await self.send_array_response(writer, ["PSYNC", "?", "-1"])
+        await self.receive_master_response(reader)
 
     async def receive_master_response(self, reader):
         return await reader.read(1024)
