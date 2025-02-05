@@ -36,7 +36,7 @@ class RedisServer:
         """Handles communication with a single client."""
         if self.dir_path and self.file_name:
             await self.parse_rdb_file()
-
+        print(self.store)
         while True:
             try:
                 data = await self.read_client_input(reader)
@@ -162,11 +162,12 @@ class RedisServer:
 
                 keys_count = 0
                 index = hash_table_info_start + db_header_len + 1
+                print(contents[index:])
                 while keys_count < hash_table_size and index < len(contents):
                     index = contents.find(b"\x00", index)
                     key, key_len = self.string_encoding(contents[index + 1:])
                     index += key_len
-                    value, value_len = self.string_encoding(contents[index + 1: index + 10])
+                    value, value_len = self.string_encoding(contents[index + 1:])
                     keys_count += 1
                     self.store[key] = [value, None]
         except OSError:
@@ -194,6 +195,8 @@ class RedisServer:
         elif first_byte == b"\xC2":
             return str(int.from_bytes(encoding[1:5], "little")), 5
         else:
+            print(encoding)
+            print(encoding[0])
             return encoding[1: encoding[0] + 1].decode(), encoding[0] + 1
 
 
