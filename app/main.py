@@ -9,20 +9,23 @@ logging.basicConfig(level=logging.INFO)
 class RedisServer:
     def __init__(self, master_host="localhost", master_port=6379):
         args = sys.argv
+
+        self.port = 6379
         if "--port" in args:
             self.port = int(args[args.index("--port") + 1])
-        else:
-            self.port = 6379
 
-        self.file_name = None
+        self.master = None
+        if "--replicaof" in args:
+            self.master = args[args.index("--replicaof") + 1].split()
+
         self.dir_path = None
-
         if "--dir" in args:
             self.dir_path = args[args.index("--dir") + 1]
+
+        self.file_name = None
         if "--dbfilename" in args:
             self.file_name = args[args.index("--dbfilename") + 1]
 
-        self.master = [master_host, master_port]
         self.store = {}
         self.streams = {}
         self.repl_ports = {}
@@ -65,7 +68,10 @@ class RedisServer:
                 elif command == "KEYS":
                     await self.send_array_response(writer, list(self.store))
                 elif command == "INFO":
-                    await self.send_string_response(writer, "role:master")
+                    if self.master is not None:
+                        await self.send_string_response(writer, "role:slave")
+                    else:
+                        await self.send_string_response(writer, "role:master")
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
