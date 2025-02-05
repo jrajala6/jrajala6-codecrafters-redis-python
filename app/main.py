@@ -47,7 +47,15 @@ class RedisServer:
         # Send PING
         reader, writer = await asyncio.open_connection(*self.master)
         await self.send_array_response(writer, ["PING"])
+        await self.receive_master_response(reader)
+        # Configure replication: inform listening port and assert capabilities (hardcoded --> psync2)
+        await self.send_array_response(writer, ["REPLCONF", "listening-port", str(self.port)])
+        await self.receive_master_response(reader)
+        await self.send_array_response(writer, ["REPLCONF", "capa", "psync2"])
+        await self.receive_master_response(reader)
 
+    async def receive_master_response(self, reader):
+        return await reader.read(1024)
 
     async def handle_client(self, reader, writer):
         """Handles communication with a single client."""
