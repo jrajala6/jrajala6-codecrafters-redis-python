@@ -8,11 +8,14 @@ logging.basicConfig(level=logging.INFO)
 
 class RedisServer:
     def __init__(self, port=6379, master_host="localhost", master_port=6379):
+        args = sys.argv
+        if "--port" in args:
+            self.port = args[args.index("--port") + 1]
+
         self.port = port
         self.file_name = None
         self.dir_path = None
 
-        args = sys.argv
         if "--dir" in args:
             self.dir_path = args[args.index("--dir") + 1]
         if "--dbfilename" in args:
