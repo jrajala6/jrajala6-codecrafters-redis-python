@@ -7,12 +7,13 @@ logging.basicConfig(level=logging.INFO)
 
 
 class RedisServer:
-    def __init__(self, port=6379, master_host="localhost", master_port=6379):
+    def __init__(self, master_host="localhost", master_port=6379):
         args = sys.argv
         if "--port" in args:
             self.port = int(args[args.index("--port") + 1])
+        else:
+            self.port = 6379
 
-        self.port = port
         self.file_name = None
         self.dir_path = None
 
@@ -229,5 +230,5 @@ class RedisServer:
 
 
 if __name__ == "__main__":
-    server = RedisServer(port=6379)
+    server = RedisServer()
     asyncio.run(server.start())
