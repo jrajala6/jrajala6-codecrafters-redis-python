@@ -29,7 +29,7 @@ class RedisServer:
 
         self.store = {}
         self.streams = {}
-        self.repl_ports = {}
+        self.repl_ports = []
         self.replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
         self.repl_offset = 0
         self.wait_events = {}
@@ -67,7 +67,7 @@ class RedisServer:
         print(self.store)
         while True:
             try:
-                data = await self.read_client_input(reader)
+                unparsed_data, data = await self.read_client_input(reader)
                 if not data:
                     break
 
@@ -81,6 +81,7 @@ class RedisServer:
                     if len(data) == 5:
                         expiry = int(data[4])
                     self.update_store(data[1], data[2], expiry)
+                    await self.send_propagation(unparsed_data)
                     await self.send_simple_response(writer, "+OK")
                 elif command == "GET":
                     await self.handle_get_command(writer, data[1])
@@ -96,6 +97,8 @@ class RedisServer:
                                                                 f"master_replid:{self.replid}\n"
                                                                 f"master_repl_offset:{self.repl_offset}")
                 elif command == "REPLCONF":
+                    if data[1] == "listening-port":
+                        self.repl_ports.append(writer)
                     await self.send_simple_response(writer, "+OK")
                 elif command == "PSYNC":
                     if data[1] == "?" and data[2] == "-1":
@@ -106,6 +109,10 @@ class RedisServer:
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
+
+    async def send_propagation(self, data):
+        for slave_writer in self.repl_ports:
+            slave_writer.write(data)
 
     async def send_empty_rdbfile_response(self, writer):
         file_contents = bytes.fromhex("524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2")
@@ -136,11 +143,11 @@ class RedisServer:
         try:
             data = await reader.read(1024)
             if not data:
-                return []
-            return self.parse_input(data.decode())
+                return data, []
+            return data, self.parse_input(data.decode())
         except Exception as e:
             logging.error(f"Failed to parse input: {e}")
-            return []
+            return data, []
 
     def parse_input(self, data):
         """Parses RESP (Redis Serialization Protocol) input."""
