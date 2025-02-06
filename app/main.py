@@ -53,6 +53,7 @@ class RedisServer:
         await self.receive_master_response(reader)
         await self.send_array_response(writer, ["REPLCONF", "capa", "psync2"])
         await self.receive_master_response(reader)
+        #replica doesn't have any data yet and needs to be fully resynchronized
         await self.send_array_response(writer, ["PSYNC", "?", "-1"])
         await self.receive_master_response(reader)
 
@@ -99,10 +100,18 @@ class RedisServer:
                 elif command == "PSYNC":
                     if data[1] == "?" and data[2] == "-1":
                         await self.send_simple_response(writer, f"+FULLRESYNC {self.replid} {self.repl_offset}") #master cannot perform incremental replication w/ replica and will start a full resynchronization
+                    await self.send_empty_rdbfile_response(writer)
+
 
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
+
+    async def send_empty_rdbfile_response(self, writer):
+        file_contents = bytes.fromhex("524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2")
+        response = f"${len(file_contents)}\r\n".encode() + file_contents
+        writer.write(response)
+        await writer.drain()
 
     async def send_simple_response(self, writer, message):
         response = f"{message}\r\n".encode()
