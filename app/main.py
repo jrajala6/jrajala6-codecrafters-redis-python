@@ -96,6 +96,10 @@ class RedisServer:
                                                                 f"master_repl_offset:{self.repl_offset}")
                 elif command == "REPLCONF":
                     await self.send_simple_response(writer, "+OK")
+                elif command == "PSYNC":
+                    if data[1] == "?" and data[2] == "-1":
+                        await self.send_simple_response(writer, f"+FULLRESYNC {self.replid} {self.repl_offset}") #master cannot perform incremental replication w/ replica and will start a full resynchronization
+
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
