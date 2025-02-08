@@ -71,12 +71,11 @@ class RedisServer:
                 # Read raw data from the master
                 unparsed_data = await reader.read(1024)
                 if not unparsed_data:
-                    continue
+                    break
 
                 unparsed_data = unparsed_data.decode().split("*")[1:]
                 for data in unparsed_data:
                     data = self.parse_input('*' + data)
-                    print(data)
                     command = data[0].upper()
 
                     if command == "SET":
@@ -84,7 +83,6 @@ class RedisServer:
                         if len(data) == 5:
                             expiry = int(data[4])
                         self.update_store(data[1], data[2], expiry)
-                        print('store', self.store)
 
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
