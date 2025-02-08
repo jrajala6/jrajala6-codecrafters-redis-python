@@ -34,6 +34,7 @@ class RedisServer:
         self.repl_offset = 0
         self.wait_events = {}
         self.waiting_clients = {}
+        self.master_connection = None
 
     async def start(self):
         if self.master is not None:
@@ -46,6 +47,7 @@ class RedisServer:
     async def send_handshake(self):
         # Send PING
         reader, writer = await asyncio.open_connection(*self.master)
+        self.master_connection = (reader, writer)
         await self.send_array_response(writer, ["PING"])
         await self.receive_master_response(reader)
         # Configure replication: inform listening port and assert capabilities (hardcoded --> psync2)
@@ -57,17 +59,46 @@ class RedisServer:
         await self.send_array_response(writer, ["PSYNC", "?", "-1"])
         await self.receive_master_response(reader)
 
+        asyncio.create_task(self.process_master_commands(reader))
+
+
     async def receive_master_response(self, reader):
         return await reader.read(1024)
+
+    async def process_master_commands(self, reader):
+        while True:
+            try:
+                # Read raw data from the master
+                unparsed_data = await reader.read(1024)
+                if not unparsed_data:
+                    continue
+
+                unparsed_data = unparsed_data.decode().split("*")[1:]
+                for data in unparsed_data:
+                    data = self.parse_input('*' + data)
+                    print(data)
+                    command = data[0].upper()
+
+                    if command == "SET":
+                        expiry = None
+                        if len(data) == 5:
+                            expiry = int(data[4])
+                        self.update_store(data[1], data[2], expiry)
+                        print('store', self.store)
+
+            except Exception as e:
+                logging.error(f"Error handling client: {e}")
+                break
+
+
 
     async def handle_client(self, reader, writer):
         """Handles communication with a single client."""
         if self.dir_path and self.file_name:
             await self.parse_rdb_file()
-        print(self.store)
         while True:
             try:
-                unparsed_data, data = await self.read_client_input(reader)
+                unparsed_data, data = await self.read_input(reader)
                 if not data:
                     break
 
@@ -110,6 +141,13 @@ class RedisServer:
                 logging.error(f"Error handling client: {e}")
                 break
 
+    '''
+    async def handle_master_commands(self, writer, reader):
+        while True:
+            try:
+                unparseddata = await self.read_input(reader)
+    '''
+
     async def send_propagation(self, data):
         for slave_writer in self.repl_ports:
             slave_writer.write(data)
@@ -138,7 +176,7 @@ class RedisServer:
         writer.write(response)
         await writer.drain()
 
-    async def read_client_input(self, reader):
+    async def read_input(self, reader):
         """Reads and parses RESP input from the client."""
         try:
             data = await reader.read(1024)
@@ -218,7 +256,6 @@ class RedisServer:
 
 
                 index = hash_table_info_start + db_header_len + 1
-                print(contents[index:])
                 num_keys = 0
 
                 def parse_key_value(index):
@@ -242,7 +279,6 @@ class RedisServer:
                         num_keys += 1
                         index += val[1] + key[1] + 10
 
-                print(self.store)
         except OSError:
             pass
 
