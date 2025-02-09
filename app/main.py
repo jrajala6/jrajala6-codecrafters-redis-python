@@ -58,24 +58,42 @@ class RedisServer:
         #replica doesn't have any data yet and needs to be fully resynchronized
         await self.send_array_response(writer, ["PSYNC", "?", "-1"])
         await self.receive_master_response(reader)
+        await self.receive_rdb_file(reader)
 
-        asyncio.create_task(self.process_master_commands(reader))
+        asyncio.create_task(self.process_master_commands(reader, writer))
 
+    async def receive_rdb_file(self, reader):
+        size_data = await reader.readline()
+        if b'$' not in size_data:
+            logging.error("Invalid RDB file format")
+        else:
+            size = int(size_data[1:-2])
+
+        return await reader.read(size)
 
     async def receive_master_response(self, reader):
-        return await reader.read(1024)
+        return await reader.readline()
 
-    async def process_master_commands(self, reader):
+    async def process_master_commands(self, reader, writer):
         while True:
             try:
                 # Read raw data from the master
                 unparsed_data = await reader.read(1024)
                 if not unparsed_data:
                     break
+                #print(unparsed_data)
+                #unparsed_data = unparsed_data.decode().split("*")[1:]
+                #print(unparsed_data)
+                parsed_data = []
+                remaining = unparsed_data.decode()
+                while True:
+                    parsed, remaining = self.parse_input(remaining, True)
+                    parsed_data.append(parsed)
+                    if remaining == "":
+                        break
 
-                unparsed_data = unparsed_data.decode().split("*")[1:]
-                for data in unparsed_data:
-                    data = self.parse_input('*' + data)
+                print(parsed_data)
+                for data in parsed_data:
                     command = data[0].upper()
 
                     if command == "SET":
@@ -83,6 +101,8 @@ class RedisServer:
                         if len(data) == 5:
                             expiry = int(data[4])
                         self.update_store(data[1], data[2], expiry)
+                    if command == "REPLCONF" and data[1] == "GETACK":
+                        await self.send_array_response(writer, ["REPLCONF", "ACK", "0"])
 
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
@@ -129,6 +149,7 @@ class RedisServer:
                     if data[1] == "listening-port":
                         self.repl_ports.append(writer)
                     await self.send_simple_response(writer, "+OK")
+
                 elif command == "PSYNC":
                     if data[1] == "?" and data[2] == "-1":
                         await self.send_simple_response(writer, f"+FULLRESYNC {self.replid} {self.repl_offset}") #master cannot perform incremental replication w/ replica and will start a full resynchronization
@@ -185,7 +206,7 @@ class RedisServer:
             logging.error(f"Failed to parse input: {e}")
             return data, []
 
-    def parse_input(self, data):
+    def parse_input(self, data, from_master=False):
         """Parses RESP (Redis Serialization Protocol) input."""
         try:
             input_len = int(data[1])
@@ -200,7 +221,8 @@ class RedisServer:
                     string = data[first_cr + 2: first_cr + 2 + string_len]
                     input_elements.append(string)
                     pointer = first_cr + string_len + 4
-
+            if from_master:
+                return input_elements, data[pointer:]
             return input_elements
         except Exception as e:
             logging.error(f"Failed to decode input: {e}")
