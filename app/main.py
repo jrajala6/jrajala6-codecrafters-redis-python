@@ -155,7 +155,7 @@ class RedisServer:
                     await self.send_empty_rdbfile_response(writer)
 
                 elif command == "WAIT":
-                    await self.send_integer_response(writer, 0)
+                    await self.send_integer_response(writer, len(self.repl_ports))
 
 
             except Exception as e:
