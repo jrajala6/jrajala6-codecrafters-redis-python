@@ -75,35 +75,34 @@ class RedisServer:
         return await reader.readline()
 
     async def process_master_commands(self, reader, writer):
+        total_processed_bytes = 0
         while True:
             try:
                 # Read raw data from the master
                 unparsed_data = await reader.read(1024)
                 if not unparsed_data:
                     break
-                #print(unparsed_data)
+                print(unparsed_data)
                 #unparsed_data = unparsed_data.decode().split("*")[1:]
                 #print(unparsed_data)
-                parsed_data = []
+                parsed_data = {}
                 remaining = unparsed_data.decode()
                 while True:
-                    parsed, remaining = self.parse_input(remaining, True)
-                    parsed_data.append(parsed)
+                    parsed, remaining, new_processed_bytes = self.parse_input(remaining, True)
+                    parsed_data[parsed] = new_processed_bytes
                     if remaining == "":
                         break
 
-                print(parsed_data)
                 for data in parsed_data:
                     command = data[0].upper()
-
                     if command == "SET":
                         expiry = None
                         if len(data) == 5:
                             expiry = int(data[4])
                         self.update_store(data[1], data[2], expiry)
                     if command == "REPLCONF" and data[1] == "GETACK":
-                        await self.send_array_response(writer, ["REPLCONF", "ACK", "0"])
-
+                        await self.send_array_response(writer, ["REPLCONF", "ACK", str(total_processed_bytes)])
+                    total_processed_bytes += parsed_data[data]
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
                 break
@@ -210,7 +209,8 @@ class RedisServer:
         """Parses RESP (Redis Serialization Protocol) input."""
         try:
             input_len = int(data[1])
-            data = data[data.index("\r\n") + 2:]
+            start = data.index("\r\n") + 2
+            data = data[start:]
             input_elements = []
             pointer = 0
             while len(input_elements) < input_len:
@@ -222,7 +222,7 @@ class RedisServer:
                     input_elements.append(string)
                     pointer = first_cr + string_len + 4
             if from_master:
-                return input_elements, data[pointer:]
+                return tuple(input_elements), data[pointer:], start + pointer
             return input_elements
         except Exception as e:
             logging.error(f"Failed to decode input: {e}")
