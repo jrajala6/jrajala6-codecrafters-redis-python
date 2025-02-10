@@ -154,6 +154,9 @@ class RedisServer:
                         await self.send_simple_response(writer, f"+FULLRESYNC {self.replid} {self.repl_offset}") #master cannot perform incremental replication w/ replica and will start a full resynchronization
                     await self.send_empty_rdbfile_response(writer)
 
+                elif command == "WAIT":
+                    await self.send_integer_response(writer, 0)
+
 
             except Exception as e:
                 logging.error(f"Error handling client: {e}")
@@ -191,6 +194,11 @@ class RedisServer:
         response = f"*{len(data)}\r\n".encode()
         for item in data:
             response += f"${len(item)}\r\n{item}\r\n".encode()
+        writer.write(response)
+        await writer.drain()
+
+    async def send_integer_response(self, writer, integer: int):
+        response = f":{integer}\r\n".encode()
         writer.write(response)
         await writer.drain()
 
