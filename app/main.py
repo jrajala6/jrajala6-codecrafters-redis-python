@@ -5,7 +5,9 @@ import sys
 from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 
-
+TYPES = {
+    "str": "string"
+}
 class RedisServer:
     def __init__(self, master_host="localhost", master_port=6379):
         args = sys.argv
@@ -160,11 +162,19 @@ class RedisServer:
                 await self.send_empty_rdbfile_response(writer)
 
             elif command == "WAIT":
-                if len(self.repl_ports) > 0:
-                    acknowledged_replicas = await self.find_all_acks(int(data[1]), int(data[2]))
-                    await self.send_integer_response(writer, acknowledged_replicas)
+                num_replicas_expected = int(data[1])
+                if num_replicas_expected == 0:
+                    await self.send_integer_response(writer, num_replicas_expected)
                 else:
-                    await self.send_integer_response(writer, 0)
+                    acknowledged_replicas = await self.find_all_acks(num_replicas_expected, int(data[2]))
+                    await self.send_integer_response(writer, acknowledged_replicas)
+
+            elif command == "TYPE":
+                key = data[1]
+                if key in self.store:
+                    await self.send_simple_response(writer, f"+{TYPES[type(self.store[key][0]).__name__]}")
+                else:
+                    await self.send_simple_response(writer, "+none")
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
         start_time = time.time()
@@ -180,7 +190,6 @@ class RedisServer:
                 await asyncio.wait_for(self.ack_event.wait(), timeout=(timeout_ms / 1000) - (time.time() - start_time))
             except asyncio.TimeoutError:
                 break  # Stop waiting if timeout occurs
-
             self.ack_event.clear()  # Reset event to wait for new ACKs
 
             # Count how many replicas have acknowledged the latest write
