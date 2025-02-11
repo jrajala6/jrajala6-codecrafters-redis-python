@@ -29,12 +29,14 @@ class RedisServer:
 
         self.store = {}
         self.streams = {}
-        self.repl_ports = []
+        self.repl_ports = {}
         self.replid = "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"
         self.repl_offset = 0
         self.wait_events = {}
         self.waiting_clients = {}
         self.master_connection = None
+        self.lock = asyncio.Lock()
+        self.ack_event = asyncio.Event()
 
     async def start(self):
         if self.master is not None:
@@ -114,64 +116,87 @@ class RedisServer:
         if self.dir_path and self.file_name:
             await self.parse_rdb_file()
         while True:
-            try:
-                unparsed_data, data = await self.read_input(reader)
-                if not data:
-                    break
-
-                command = data[0].upper()
-                if command == "PING":
-                    await self.send_simple_response(writer, "+PONG")
-                if command == "ECHO":
-                    await self.send_string_response(writer, data[1])
-                if command == "SET":
-                    expiry = None
-                    if len(data) == 5:
-                        expiry = int(data[4])
-                    self.update_store(data[1], data[2], expiry)
-                    await self.send_propagation(unparsed_data)
-                    await self.send_simple_response(writer, "+OK")
-                elif command == "GET":
-                    await self.handle_get_command(writer, data[1])
-                elif command == "CONFIG" and data[1].upper() == "GET":
-                    await self.handle_config_command(writer, data[2])
-                elif command == "KEYS":
-                    await self.send_array_response(writer, list(self.store))
-                elif command == "INFO":
-                    if self.master is not None:
-                        await self.send_string_response(writer, "role:slave")
-                    else:
-                        await self.send_string_response(writer, f"role:master\n"
-                                                                f"master_replid:{self.replid}\n"
-                                                                f"master_repl_offset:{self.repl_offset}")
-                elif command == "REPLCONF":
-                    if data[1] == "listening-port":
-                        self.repl_ports.append(writer)
-                    await self.send_simple_response(writer, "+OK")
-
-                elif command == "PSYNC":
-                    if data[1] == "?" and data[2] == "-1":
-                        await self.send_simple_response(writer, f"+FULLRESYNC {self.replid} {self.repl_offset}") #master cannot perform incremental replication w/ replica and will start a full resynchronization
-                    await self.send_empty_rdbfile_response(writer)
-
-                elif command == "WAIT":
-                    await self.send_integer_response(writer, len(self.repl_ports))
-
-
-            except Exception as e:
-                logging.error(f"Error handling client: {e}")
+            unparsed_data, data = await self.read_input(reader)
+            if not data:
                 break
 
-    '''
-    async def handle_master_commands(self, writer, reader):
-        while True:
+            command = data[0].upper()
+            if command == "PING":
+                await self.send_simple_response(writer, "+PONG")
+            if command == "ECHO":
+                await self.send_string_response(writer, data[1])
+            if command == "SET":
+                expiry = None
+                if len(data) == 5:
+                    expiry = int(data[4])
+                self.update_store(data[1], data[2], expiry)
+                await self.send_propagation(unparsed_data)
+                await self.send_simple_response(writer, "+OK")
+            elif command == "GET":
+                await self.handle_get_command(writer, data[1])
+            elif command == "CONFIG" and data[1].upper() == "GET":
+                await self.handle_config_command(writer, data[2])
+            elif command == "KEYS":
+                await self.send_array_response(writer, list(self.store))
+            elif command == "INFO":
+                if self.master is not None:
+                    await self.send_string_response(writer, "role:slave")
+                else:
+                    await self.send_string_response(writer, f"role:master\n"
+                                                            f"master_replid:{self.replid}\n"
+                                                            f"master_repl_offset:{self.repl_offset}")
+            elif command == "REPLCONF":
+                if data[1] == "listening-port":
+                    self.repl_ports[writer] = 0
+                if data[1] == "ACK":
+                    self.repl_ports[writer] = int(data[2])
+                    self.ack_event.set()
+                if data[1] != "ACK":
+                    await self.send_simple_response(writer, "+OK")
+
+            elif command == "PSYNC":
+                if data[1] == "?" and data[2] == "-1":
+                    await self.send_simple_response(writer, f"+FULLRESYNC {self.replid} {self.repl_offset}") #master cannot perform incremental replication w/ replica and will start a full resynchronization
+                await self.send_empty_rdbfile_response(writer)
+
+            elif command == "WAIT":
+                if len(self.repl_ports) > 0:
+                    acknowledged_replicas = await self.find_all_acks(int(data[1]), int(data[2]))
+                    await self.send_integer_response(writer, acknowledged_replicas)
+                else:
+                    await self.send_integer_response(writer, 0)
+
+    async def find_all_acks(self, num_replicas_expected, timeout_ms):
+        start_time = time.time()
+
+        # Ask all replicas for their latest ACKs
+        for slave_writer in self.repl_ports:
+            await self.send_array_response(slave_writer, ["REPLCONF", "GETACK", "*"])
+
+        acknowledged_replicas = sum(1 for ack in self.repl_ports.values() if ack >= self.repl_offset)
+        while time.time() - start_time < timeout_ms / 1000:
             try:
-                unparseddata = await self.read_input(reader)
-    '''
+                # Wait until an ACK is received (or timeout)
+                await asyncio.wait_for(self.ack_event.wait(), timeout=(timeout_ms / 1000) - (time.time() - start_time))
+            except asyncio.TimeoutError:
+                break  # Stop waiting if timeout occurs
+
+            self.ack_event.clear()  # Reset event to wait for new ACKs
+
+            # Count how many replicas have acknowledged the latest write
+            acknowledged_replicas = sum(1 for ack in self.repl_ports.values() if ack >= self.repl_offset)
+
+            if acknowledged_replicas >= num_replicas_expected:
+                break  # Stop early if enough replicas acknowledged
+
+        return acknowledged_replicas
 
     async def send_propagation(self, data):
+        self.repl_offset += len(data)
         for slave_writer in self.repl_ports:
             slave_writer.write(data)
+            await slave_writer.drain()
+
 
     async def send_empty_rdbfile_response(self, writer):
         file_contents = bytes.fromhex("524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2")
@@ -204,6 +229,7 @@ class RedisServer:
 
     async def read_input(self, reader):
         """Reads and parses RESP input from the client."""
+
         try:
             data = await reader.read(1024)
             if not data:
