@@ -396,13 +396,19 @@ class StreamEntry:
 
     def parse_stream_id(self):
         if self._stream_id == "*":
-            pass
+            return self.autogenerate_stream_id()
         ms, sn = self._stream_id.split("-")
         ms = int(ms)
         if sn == "*":
             sn = self.autogenerate_sn(ms)
         sn = int(sn)
         return ms, sn
+
+    def autogenerate_stream_id(self):
+        ms = int(round(time.time() * 1000))
+        sn = self.autogenerate_sn(ms)
+        return ms, sn
+
 
     def autogenerate_sn(self, ms):
         for stream_entry in self.streams[-1::-1]:
