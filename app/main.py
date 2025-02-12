@@ -6,7 +6,8 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 
 TYPES = {
-    "str": "string"
+    "<class 'str'>" : "string",
+    "<class '__main__.StreamEntry'>": "stream"
 }
 class RedisServer:
     def __init__(self, master_host="localhost", master_port=6379):
@@ -37,8 +38,8 @@ class RedisServer:
         self.wait_events = {}
         self.waiting_clients = {}
         self.master_connection = None
-        self.lock = asyncio.Lock()
         self.ack_event = asyncio.Event()
+        self.streams = []
 
     async def start(self):
         if self.master is not None:
@@ -172,9 +173,17 @@ class RedisServer:
             elif command == "TYPE":
                 key = data[1]
                 if key in self.store:
-                    await self.send_simple_response(writer, f"+{TYPES[type(self.store[key][0]).__name__]}")
+                    await self.send_simple_response(writer, f"+{TYPES[str(type(self.store[key][0]))]}")
                 else:
                     await self.send_simple_response(writer, "+none")
+
+            elif command == "XADD":
+                added_entry = StreamEntry(data[1], data[2])
+                added_entry.add_keyvalue_pairs(data[3:])
+                print(type(added_entry))
+                self.store[data[1]] = [added_entry, None]
+                self.streams.append(added_entry)
+                await self.send_string_response(writer, added_entry.stream_id())
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
         start_time = time.time()
@@ -369,9 +378,24 @@ class RedisServer:
         else:
             return contents[index + 1: index + contents[index] + 1].decode(), contents[index] + 1
 
+class StreamEntry:
+    def __init__(self, stream_key, stream_id):
+        self._stream_key = stream_key
+        self._stream_id = stream_id
+        self._contents = {}
 
+    def add_keyvalue_pairs(self, contents: list):
+        for idx in range(0, len(contents), 2):
+            self._contents[contents[idx]] = contents[idx + 1]
 
+    def stream_key(self):
+        return self._stream_key
 
+    def stream_id(self):
+        return self._stream_id
+
+    def contents(self):
+        return self._contents
 
 
 
