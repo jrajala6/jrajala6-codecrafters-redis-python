@@ -40,6 +40,7 @@ class RedisServer:
         self.master_connection = None
         self.ack_event = asyncio.Event()
         self.streams = [StreamEntry("base", "0-0")]
+        StreamEntry.streams = self.streams
 
     async def start(self):
         if self.master is not None:
@@ -180,11 +181,11 @@ class RedisServer:
             elif command == "XADD":
                 added_entry = StreamEntry(data[1], data[2])
                 added_entry.add_keyvalue_pairs(data[3:])
-                is_valid = added_entry.validate_entry_id(self.streams[-1])
+                is_valid = added_entry.validate_entry_id()
                 if is_valid:
                     self.store[data[1]] = [added_entry, None]
                     self.streams.append(added_entry)
-                    await self.send_string_response(writer, added_entry.stream_id())
+                    await self.send_string_response(writer, f"{added_entry.stream_id_ms()}-{added_entry.stream_id_sn()}")
                 else:
                     if added_entry.stream_id() == "0-0":
                         await self.send_simple_response(writer,"-ERR The ID specified in XADD must be greater than 0-0")
@@ -386,12 +387,28 @@ class RedisServer:
             return contents[index + 1: index + contents[index] + 1].decode(), contents[index] + 1
 
 class StreamEntry:
+    streams = []
     def __init__(self, stream_key, stream_id):
         self._stream_key = stream_key
         self._stream_id = stream_id
-        self._stream_id_ms, self._stream_id_sn = self._stream_id.split("-")
-        self._stream_id_ms, self._stream_id_sn = int(self._stream_id_ms), int(self._stream_id_sn)
+        self._stream_id_ms, self._stream_id_sn = self.parse_stream_id()
         self._contents = {}
+
+    def parse_stream_id(self):
+        if self._stream_id == "*":
+            pass
+        ms, sn = self._stream_id.split("-")
+        ms = int(ms)
+        if sn == "*":
+            sn = self.autogenerate_sn(ms)
+        sn = int(sn)
+        return ms, sn
+
+    def autogenerate_sn(self, ms):
+        for stream_entry in self.streams[-1::-1]:
+            if stream_entry.stream_id_ms() == ms:
+                return stream_entry.stream_id_sn() + 1
+        return 0 if ms != 0 else 1
 
 
     def add_keyvalue_pairs(self, contents: list):
@@ -413,7 +430,8 @@ class StreamEntry:
     def contents(self):
         return self._contents
 
-    def validate_entry_id(self, other):
+    def validate_entry_id(self):
+        other = self.streams[-1]
         if other.stream_id_ms() > self.stream_id_ms():
             return False
         if other.stream_id_ms() == self.stream_id_ms() and other.stream_id_sn() >= self.stream_id_sn():
