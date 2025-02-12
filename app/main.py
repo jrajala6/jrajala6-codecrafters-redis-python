@@ -39,7 +39,7 @@ class RedisServer:
         self.waiting_clients = {}
         self.master_connection = None
         self.ack_event = asyncio.Event()
-        self.streams = []
+        self.streams = [StreamEntry("base", "0-0")]
 
     async def start(self):
         if self.master is not None:
@@ -180,10 +180,17 @@ class RedisServer:
             elif command == "XADD":
                 added_entry = StreamEntry(data[1], data[2])
                 added_entry.add_keyvalue_pairs(data[3:])
-                print(type(added_entry))
-                self.store[data[1]] = [added_entry, None]
-                self.streams.append(added_entry)
-                await self.send_string_response(writer, added_entry.stream_id())
+                is_valid = added_entry.validate_entry_id(self.streams[-1])
+                if is_valid:
+                    self.store[data[1]] = [added_entry, None]
+                    self.streams.append(added_entry)
+                    await self.send_string_response(writer, added_entry.stream_id())
+                else:
+                    if added_entry.stream_id() == "0-0":
+                        await self.send_simple_response(writer,"-ERR The ID specified in XADD must be greater than 0-0")
+                    else:
+                        await self.send_simple_response(writer, "-ERR The ID specified in XADD is equal or smaller than the target stream top item")
+
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
         start_time = time.time()
@@ -382,7 +389,10 @@ class StreamEntry:
     def __init__(self, stream_key, stream_id):
         self._stream_key = stream_key
         self._stream_id = stream_id
+        self._stream_id_ms, self._stream_id_sn = self._stream_id.split("-")
+        self._stream_id_ms, self._stream_id_sn = int(self._stream_id_ms), int(self._stream_id_sn)
         self._contents = {}
+
 
     def add_keyvalue_pairs(self, contents: list):
         for idx in range(0, len(contents), 2):
@@ -394,8 +404,21 @@ class StreamEntry:
     def stream_id(self):
         return self._stream_id
 
+    def stream_id_ms(self):
+        return self._stream_id_ms
+
+    def stream_id_sn(self):
+        return self._stream_id_sn
+
     def contents(self):
         return self._contents
+
+    def validate_entry_id(self, other):
+        if other.stream_id_ms() > self.stream_id_ms():
+            return False
+        if other.stream_id_ms() == self.stream_id_ms() and other.stream_id_sn() >= self.stream_id_sn():
+            return False
+        return True
 
 
 
