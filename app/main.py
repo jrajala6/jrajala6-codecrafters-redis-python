@@ -192,6 +192,15 @@ class RedisServer:
                     else:
                         await self.send_simple_response(writer, "-ERR The ID specified in XADD is equal or smaller than the target stream top item")
 
+            elif command == "XRANGE":
+                contents = StreamEntry.find_range(data[1], data[2], data[3])
+                result = []
+                for content in contents:
+                    result.append(content)
+                print(self.encode_array_response(result))
+                await self.send_array_response(writer, result)
+
+
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
         start_time = time.time()
@@ -240,11 +249,18 @@ class RedisServer:
         writer.write(response)
         await writer.drain()
 
-    async def send_array_response(self, writer, data):
-        """Sends an array RESP response."""
+    def encode_array_response(self, data):
         response = f"*{len(data)}\r\n".encode()
         for item in data:
-            response += f"${len(item)}\r\n{item}\r\n".encode()
+            if type(item) == list:
+                response += self.encode_array_response(item)
+            else:
+                response += f"${len(str(item))}\r\n{item}\r\n".encode()
+        return response
+
+    async def send_array_response(self, writer, data):
+        """Sends an array RESP response."""
+        response = self.encode_array_response(data)
         writer.write(response)
         await writer.drain()
 
@@ -443,6 +459,34 @@ class StreamEntry:
         if other.stream_id_ms() == self.stream_id_ms() and other.stream_id_sn() >= self.stream_id_sn():
             return False
         return True
+
+    @staticmethod
+    def find_range(key, start, stop):
+        if "-" in start:
+            start_ms, start_sn = start.split("-")
+            start_ms, start_sn = int(start_ms), int(start_sn)
+        else:
+            start_ms, start_sn = int(start), 0
+
+        if "-" in stop:
+            stop_ms, stop_sn = stop.split("-")
+            stop_ms, stop_sn = int(stop_ms), int(stop_sn)
+        else:
+            stop_ms, stop_sn = int(stop), len(StreamEntry.streams)
+        for stream_entry in StreamEntry.streams:
+            if key == stream_entry.stream_key() and start_ms <= stream_entry.stream_id_ms() <= stop_ms:
+                if stream_entry.stream_id_ms() == start_ms and stream_entry.stream_id_sn() < start_sn:
+                    continue
+                if stream_entry.stream_id_ms() == stop_ms and stream_entry.stream_id_sn() > stop_sn:
+                    continue
+                output = [f"{stream_entry.stream_id_ms()}-{stream_entry.stream_id_sn()}"]
+                output.append([item for key in stream_entry.contents() for item in (key, stream_entry.contents()[key])])
+                yield output
+
+
+
+
+
 
 
 
