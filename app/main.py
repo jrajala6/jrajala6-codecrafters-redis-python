@@ -197,9 +197,15 @@ class RedisServer:
                 result = []
                 for content in contents:
                     result.append(content)
-                print(self.encode_array_response(result))
                 await self.send_array_response(writer, result)
 
+            elif command == "XREAD":
+                contents = StreamEntry.xread(data[2], data[3])
+                result = [[data[2]]]
+                for content in contents:
+                    result[0].append([content])
+                print(self.encode_array_response(result))
+                await self.send_array_response(writer, result)
 
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
@@ -484,6 +490,25 @@ class StreamEntry:
                 if stream_entry.stream_id_ms() == start_ms and stream_entry.stream_id_sn() < start_sn:
                     continue
                 if stream_entry.stream_id_ms() == stop_ms and stream_entry.stream_id_sn() > stop_sn:
+                    continue
+                output = [f"{stream_entry.stream_id_ms()}-{stream_entry.stream_id_sn()}"]
+                output.append([item for key in stream_entry.contents() for item in (key, stream_entry.contents()[key])])
+                yield output
+
+    @staticmethod
+    def xread(key, start):
+        if start == "-":
+            start_ms, start_sn = 0, 0
+
+        elif "-" in start:
+            start_ms, start_sn = start.split("-")
+            start_ms, start_sn = int(start_ms), int(start_sn)
+        else:
+            start_ms, start_sn = int(start), 0
+
+        for stream_entry in StreamEntry.streams:
+            if key == stream_entry.stream_key() and start_ms <= stream_entry.stream_id_ms():
+                if stream_entry.stream_id_ms() == start_ms and stream_entry.stream_id_sn() <= start_sn:
                     continue
                 output = [f"{stream_entry.stream_id_ms()}-{stream_entry.stream_id_sn()}"]
                 output.append([item for key in stream_entry.contents() for item in (key, stream_entry.contents()[key])])
