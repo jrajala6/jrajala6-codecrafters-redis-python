@@ -462,7 +462,10 @@ class StreamEntry:
 
     @staticmethod
     def find_range(key, start, stop):
-        if "-" in start:
+        if start == "-":
+            start_ms, start_sn = 0, 0
+
+        elif "-" in start:
             start_ms, start_sn = start.split("-")
             start_ms, start_sn = int(start_ms), int(start_sn)
         else:
