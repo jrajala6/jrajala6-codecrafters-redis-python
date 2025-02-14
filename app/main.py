@@ -471,7 +471,10 @@ class StreamEntry:
         else:
             start_ms, start_sn = int(start), 0
 
-        if "-" in stop:
+        if stop == "+":
+            stop_ms, stop_sn = StreamEntry.streams[-1].stream_id_ms(), StreamEntry.streams[-1].stream_id_sn()
+
+        elif "-" in stop:
             stop_ms, stop_sn = stop.split("-")
             stop_ms, stop_sn = int(stop_ms), int(stop_sn)
         else:
