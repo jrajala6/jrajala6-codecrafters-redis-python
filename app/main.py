@@ -200,12 +200,15 @@ class RedisServer:
                 await self.send_array_response(writer, result)
 
             elif command == "XREAD":
-                contents = StreamEntry.xread(data[2], data[3])
-                result = [[data[2]]]
-                for content in contents:
-                    result[0].append([content])
-                print(self.encode_array_response(result))
-                await self.send_array_response(writer, result)
+                num_keys = (len(data) - 2) // 2
+                output = []
+                for idx in range(2, 2 + num_keys):
+                    contents = StreamEntry.xread(data[idx], data[num_keys + idx])
+                    result = [data[idx]]
+                    for content in contents:
+                        result.append([content])
+                    output.append(result)
+                await self.send_array_response(writer, output)
 
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
@@ -512,6 +515,7 @@ class StreamEntry:
                     continue
                 output = [f"{stream_entry.stream_id_ms()}-{stream_entry.stream_id_sn()}"]
                 output.append([item for key in stream_entry.contents() for item in (key, stream_entry.contents()[key])])
+                print(output)
                 yield output
 
 
