@@ -200,9 +200,15 @@ class RedisServer:
                 await self.send_array_response(writer, result)
 
             elif command == "XREAD":
-                num_keys = (len(data) - 2) // 2
+                if data[1] == "block":
+                    start = 4
+                    await asyncio.wait(int(data[2]))
+                else:
+                    start = 2
+
+                num_keys = (len(data) - start) // 2
                 output = []
-                for idx in range(2, 2 + num_keys):
+                for idx in range(start, start + num_keys):
                     contents = StreamEntry.xread(data[idx], data[num_keys + idx])
                     result = [data[idx]]
                     for content in contents:
