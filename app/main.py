@@ -41,6 +41,8 @@ class RedisServer:
         self.ack_event = asyncio.Event()
         self.stream_event = asyncio.Event()
         self.streams = [StreamEntry("base", "0-0")]
+        self.multi = False
+        self.exec_queue = asyncio.Queue()
         StreamEntry.streams = self.streams
 
     async def start(self):
@@ -249,8 +251,13 @@ class RedisServer:
 
             elif command == "MULTI":
                 await self.send_simple_response(writer, "+OK")
+                self.multi = True
             elif command == "EXEC":
-                await self.send_simple_response(writer, "-ERR EXEC without MULTI")
+                if not self.multi:
+                    await self.send_simple_response(writer, "-ERR EXEC without MULTI")
+                else:
+                    if self.exec_queue.qsize() == 0:
+                        await self.send_array_response(writer, [])
 
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
