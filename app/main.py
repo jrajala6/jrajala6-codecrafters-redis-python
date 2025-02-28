@@ -290,7 +290,7 @@ class RedisServer:
         await writer.drain()
 
     async def send_string_response(self, writer, message):
-        response = f"${len(message)}\r\n{message}\r\n".encode()
+        response = f"${len(str(message))}\r\n{message}\r\n".encode()
         writer.write(response)
         await writer.drain()
 
