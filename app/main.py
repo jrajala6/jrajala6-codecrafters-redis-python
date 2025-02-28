@@ -123,43 +123,56 @@ class RedisServer:
 
         multi = False
         exec_queue = asyncio.Queue()
+        exec = False
+        exec_array = []
 
         while True:
-            unparsed_data, data = await self.read_input(reader)
-            if not data:
-                break
+            if exec:
+                if exec_queue.empty():
+                    await self.send_exec_response(writer, exec_array)
+                    exec = False
+                    exec_array = []
+                    multi = False
+                else:
+                    data = await exec_queue.get()
+
+            else:
+                unparsed_data, data = await self.read_input(reader)
+                if not data:
+                    break
 
             command = data[0].upper()
 
-            if multi and command != "EXEC":
-                await exec_queue.put(data)
-                await self.send_simple_response(writer, "+QUEUED")
-                continue
+            if multi:
+                if command != "EXEC":
+                    await exec_queue.put(data)
+                    await self.send_simple_response(writer, "+QUEUED")
+                    continue
 
             if command == "PING":
-                await self.send_simple_response(writer, "+PONG")
+                await self.send_simple_response(writer, "+PONG", exec, exec_array)
             if command == "ECHO":
-                await self.send_string_response(writer, data[1])
+                await self.send_string_response(writer, data[1], exec, exec_array)
             if command == "SET":
                 expiry = None
                 if len(data) == 5:
                     expiry = int(data[4])
                 self.update_store(data[1], data[2], expiry)
                 await self.send_propagation(unparsed_data)
-                await self.send_simple_response(writer, "+OK")
+                await self.send_simple_response(writer, "+OK", exec, exec_array)
             elif command == "GET":
-                await self.handle_get_command(writer, data[1])
+                await self.handle_get_command(writer, data[1], exec, exec_array)
             elif command == "CONFIG" and data[1].upper() == "GET":
                 await self.handle_config_command(writer, data[2])
             elif command == "KEYS":
                 await self.send_array_response(writer, list(self.store))
             elif command == "INFO":
                 if self.master is not None:
-                    await self.send_string_response(writer, "role:slave")
+                    await self.send_string_response(writer, "role:slave", exec, exec_array)
                 else:
                     await self.send_string_response(writer, f"role:master\n"
                                                             f"master_replid:{self.replid}\n"
-                                                            f"master_repl_offset:{self.repl_offset}")
+                                                            f"master_repl_offset:{self.repl_offset}", exec, exec_array)
             elif command == "INCR":
                 key = data[1]
                 val = self.store.get(key, [0, None])[0]
@@ -168,9 +181,9 @@ class RedisServer:
                         self.store[key][0] += 1
                     else:
                         self.store[key] = [1, None]
-                    await self.send_integer_response(writer, self.store[key][0])
+                    await self.send_integer_response(writer, self.store[key][0], exec, exec_array)
                 else:
-                    await self.send_simple_response(writer, "-ERR value is not an integer or out of range")
+                    await self.send_simple_response(writer, "-ERR value is not an integer or out of range", exec, exec_array)
 
             elif command == "REPLCONF":
                 if data[1] == "listening-port":
@@ -179,11 +192,11 @@ class RedisServer:
                     self.repl_ports[writer] = int(data[2])
                     self.ack_event.set()
                 if data[1] != "ACK":
-                    await self.send_simple_response(writer, "+OK")
+                    await self.send_simple_response(writer, "+OK", exec, exec_array)
 
             elif command == "PSYNC":
                 if data[1] == "?" and data[2] == "-1":
-                    await self.send_simple_response(writer, f"+FULLRESYNC {self.replid} {self.repl_offset}") #master cannot perform incremental replication w/ replica and will start a full resynchronization
+                    await self.send_simple_response(writer, f"+FULLRESYNC {self.replid} {self.repl_offset}", exec, exec_array) #master cannot perform incremental replication w/ replica and will start a full resynchronization
                 await self.send_empty_rdbfile_response(writer)
 
             elif command == "WAIT":
@@ -261,12 +274,13 @@ class RedisServer:
                 await self.send_simple_response(writer, "+OK")
                 multi = True
             elif command == "EXEC":
-                print(multi)
                 if not multi:
                     await self.send_simple_response(writer, "-ERR EXEC without MULTI")
                 else:
                     if exec_queue.qsize() == 0:
                         await self.send_array_response(writer, [])
+                    else:
+                        exec = True
                 multi = False
 
 
@@ -307,13 +321,19 @@ class RedisServer:
         writer.write(response)
         await writer.drain()
 
-    async def send_simple_response(self, writer, message):
+    async def send_simple_response(self, writer, message, exec=False, exec_array=None):
         response = f"{message}\r\n".encode()
+        if exec:
+            exec_array.append(response)
+            return
         writer.write(response)
         await writer.drain()
 
-    async def send_string_response(self, writer, message):
+    async def send_string_response(self, writer, message, exec=False, exec_array=None):
         response = f"${len(str(message))}\r\n{message}\r\n".encode()
+        if exec:
+            exec_array.append(response)
+            return
         writer.write(response)
         await writer.drain()
 
@@ -326,14 +346,25 @@ class RedisServer:
                 response += f"${len(str(item))}\r\n{item}\r\n".encode()
         return response
 
-    async def send_array_response(self, writer, data):
+    async def send_array_response(self, writer, data, exec=False, exec_array=None):
         """Sends an array RESP response."""
         response = self.encode_array_response(data)
+        if exec:
+            exec_array.append(response)
+            return
         writer.write(response)
         await writer.drain()
 
-    async def send_integer_response(self, writer, integer: int):
+    async def send_exec_response(self, writer, exec_array):
+        print(f"*{len(exec_array)}\r\n".encode() + b"".join(exec_array[:-1]))
+        writer.write(f"*{len(exec_array)}\r\n".encode() + b"".join(exec_array[:-1]))
+        await writer.drain()
+
+    async def send_integer_response(self, writer, integer: int, exec=False, exec_array=None):
         response = f":{integer}\r\n".encode()
+        if exec:
+            exec_array.append(response)
+            return
         writer.write(response)
         await writer.drain()
 
@@ -388,13 +419,13 @@ class RedisServer:
         except Exception as e:
             logging.error(f"Failed to update store: {e}")
 
-    async def handle_get_command(self, writer, key):
+    async def handle_get_command(self, writer, key, exec, exec_array):
         """Handles the GET command."""
         value_info = self.store.get(key)
         if value_info:
             value, expiry = value_info
             if (expiry is not None and time.time() <= expiry) or expiry is None:
-                await self.send_string_response(writer, value_info[0])
+                await self.send_string_response(writer, value_info[0], exec, exec_array)
                 return
             del self.store[key]
 
