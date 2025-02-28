@@ -39,6 +39,7 @@ class RedisServer:
         self.waiting_clients = {}
         self.master_connection = None
         self.ack_event = asyncio.Event()
+        self.stream_event = asyncio.Event()
         self.streams = [StreamEntry("base", "0-0")]
         StreamEntry.streams = self.streams
 
@@ -183,8 +184,12 @@ class RedisServer:
                 added_entry.add_keyvalue_pairs(data[3:])
                 is_valid = added_entry.validate_entry_id()
                 if is_valid:
-                    self.store[data[1]] = [added_entry, None]
+                    if data[1] not in self.store:
+                        self.store[data[1]] = [added_entry]
+                    else:
+                        self.store[data[1]].append(added_entry)
                     self.streams.append(added_entry)
+                    self.stream_event.set()
                     await self.send_string_response(writer, f"{added_entry.stream_id_ms()}-{added_entry.stream_id_sn()}")
                 else:
                     if added_entry.stream_id() == "0-0":
@@ -197,15 +202,16 @@ class RedisServer:
                 result = []
                 for content in contents:
                     result.append(content)
+                    continue
                 await self.send_array_response(writer, result)
 
             elif command == "XREAD":
                 if data[1] == "block":
                     start = 4
-                    await asyncio.wait(int(data[2]))
+                    timeout = int(data[2])
+                    await asyncio.sleep(timeout / 1000)
                 else:
                     start = 2
-
                 num_keys = (len(data) - start) // 2
                 output = []
                 for idx in range(start, start + num_keys):
@@ -214,7 +220,10 @@ class RedisServer:
                     for content in contents:
                         result.append([content])
                     output.append(result)
-                await self.send_array_response(writer, output)
+                if len(output[0]) == 1:
+                    await self.send_simple_response(writer, "$-1")
+                else:
+                    await self.send_array_response(writer, output)
 
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
@@ -500,9 +509,7 @@ class StreamEntry:
                     continue
                 if stream_entry.stream_id_ms() == stop_ms and stream_entry.stream_id_sn() > stop_sn:
                     continue
-                output = [f"{stream_entry.stream_id_ms()}-{stream_entry.stream_id_sn()}"]
-                output.append([item for key in stream_entry.contents() for item in (key, stream_entry.contents()[key])])
-                yield output
+                yield StreamEntry.get_output_format(stream_entry)
 
     @staticmethod
     def xread(key, start):
@@ -519,10 +526,13 @@ class StreamEntry:
             if key == stream_entry.stream_key() and start_ms <= stream_entry.stream_id_ms():
                 if stream_entry.stream_id_ms() == start_ms and stream_entry.stream_id_sn() <= start_sn:
                     continue
-                output = [f"{stream_entry.stream_id_ms()}-{stream_entry.stream_id_sn()}"]
-                output.append([item for key in stream_entry.contents() for item in (key, stream_entry.contents()[key])])
-                print(output)
-                yield output
+                yield StreamEntry.get_output_format(stream_entry)
+
+    @staticmethod
+    def get_output_format(stream_entry):
+        output = [f"{stream_entry.stream_id_ms()}-{stream_entry.stream_id_sn()}"]
+        output.append([item for key in stream_entry.contents() for item in (key, stream_entry.contents()[key])])
+        return output
 
 
 
