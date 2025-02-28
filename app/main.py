@@ -249,7 +249,7 @@ class RedisServer:
 
             elif command == "MULTI":
                 await self.send_simple_response(writer, "+OK")
-            elif command == "EXEC:
+            elif command == "EXEC":
                 await self.send_simple_response(writer, "-ERR EXEC without MULTI")
 
 
