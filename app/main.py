@@ -258,6 +258,7 @@ class RedisServer:
                 else:
                     if self.exec_queue.qsize() == 0:
                         await self.send_array_response(writer, [])
+                self.multi = False
 
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
