@@ -144,7 +144,7 @@ class RedisServer:
             command = data[0].upper()
 
             if multi:
-                if command != "EXEC":
+                if command not in {"EXEC", "DISCARD"}:
                     await exec_queue.put(data)
                     await self.send_simple_response(writer, "+QUEUED")
                     continue
