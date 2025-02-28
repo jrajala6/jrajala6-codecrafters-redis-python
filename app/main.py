@@ -154,12 +154,13 @@ class RedisServer:
                 key = data[1]
                 val = self.store.get(key, [0, None])[0]
                 if type(val) == int:
-                    print(val)
                     if key in self.store:
                         self.store[key][0] += 1
                     else:
                         self.store[key] = [1, None]
                     await self.send_integer_response(writer, self.store[key][0])
+                else:
+                    await self.send_simple_response(writer, "-ERR value is not an integer or out of range")
 
             elif command == "REPLCONF":
                 if data[1] == "listening-port":
