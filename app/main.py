@@ -128,11 +128,14 @@ class RedisServer:
 
         while True:
             if exec:
+                print(exec_queue)
+                print(exec_array)
                 if exec_queue.empty():
                     await self.send_exec_response(writer, exec_array)
                     exec = False
                     exec_array = []
                     multi = False
+                    continue
                 else:
                     data = await exec_queue.get()
 
@@ -365,8 +368,8 @@ class RedisServer:
         await writer.drain()
 
     async def send_exec_response(self, writer, exec_array):
-        print(f"*{len(exec_array)}\r\n".encode() + b"".join(exec_array[:-1]))
-        writer.write(f"*{len(exec_array)}\r\n".encode() + b"".join(exec_array[:-1]))
+        print(f"*{len(exec_array)}\r\n".encode() + b"".join(exec_array))
+        writer.write(f"*{len(exec_array)}\r\n".encode() + b"".join(exec_array))
         await writer.drain()
 
     async def send_integer_response(self, writer, integer: int, exec=False, exec_array=None):
