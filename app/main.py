@@ -249,6 +249,8 @@ class RedisServer:
 
             elif command == "MULTI":
                 await self.send_simple_response(writer, "+OK")
+            elif command == "EXEC:
+                await self.send_simple_response(writer, "-ERR EXEC without MULTI")
 
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
