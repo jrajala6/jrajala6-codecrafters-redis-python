@@ -206,6 +206,9 @@ class RedisServer:
                 await self.send_array_response(writer, result)
 
             elif command == "XREAD":
+                stream_id = None
+                if data[-1] == "$":
+                    stream_id = self.streams[-1].stream_id()
                 if data[1] == "block":
                     start = 4
                     timeout = int(data[2])
@@ -218,9 +221,6 @@ class RedisServer:
                     start = 2
                 num_keys = (len(data) - start) // 2
                 output = []
-                stream_id = None
-                if data[-1] == "$":
-                    stream_id = self.streams[-1].stream_id()
                 for idx in range(start, start + num_keys):
                     if stream_id:
                         contents = StreamEntry.xread(data[idx], stream_id)
