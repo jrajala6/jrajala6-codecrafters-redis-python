@@ -41,8 +41,6 @@ class RedisServer:
         self.ack_event = asyncio.Event()
         self.stream_event = asyncio.Event()
         self.streams = [StreamEntry("base", "0-0")]
-        self.multi = False
-        self.exec_queue = asyncio.Queue()
         StreamEntry.streams = self.streams
 
     async def start(self):
@@ -122,12 +120,22 @@ class RedisServer:
         """Handles communication with a single client."""
         if self.dir_path and self.file_name:
             await self.parse_rdb_file()
+
+        multi = False
+        exec_queue = asyncio.Queue()
+
         while True:
             unparsed_data, data = await self.read_input(reader)
             if not data:
                 break
 
             command = data[0].upper()
+
+            if multi and command != "EXEC":
+                await exec_queue.put(data)
+                await self.send_simple_response(writer, "+QUEUED")
+                continue
+
             if command == "PING":
                 await self.send_simple_response(writer, "+PONG")
             if command == "ECHO":
@@ -251,14 +259,15 @@ class RedisServer:
 
             elif command == "MULTI":
                 await self.send_simple_response(writer, "+OK")
-                self.multi = True
+                multi = True
             elif command == "EXEC":
-                if not self.multi:
+                print(multi)
+                if not multi:
                     await self.send_simple_response(writer, "-ERR EXEC without MULTI")
                 else:
-                    if self.exec_queue.qsize() == 0:
+                    if exec_queue.qsize() == 0:
                         await self.send_array_response(writer, [])
-                self.multi = False
+                multi = False
 
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
