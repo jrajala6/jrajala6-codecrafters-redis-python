@@ -218,8 +218,14 @@ class RedisServer:
                     start = 2
                 num_keys = (len(data) - start) // 2
                 output = []
+                stream_id = None
+                if data[-1] == "$":
+                    stream_id = self.streams[-1].stream_id()
                 for idx in range(start, start + num_keys):
-                    contents = StreamEntry.xread(data[idx], data[num_keys + idx])
+                    if stream_id:
+                        contents = StreamEntry.xread(data[idx], stream_id)
+                    else:
+                        contents = StreamEntry.xread(data[idx], data[num_keys + idx])
                     result = [data[idx]]
                     for content in contents:
                         result.append([content])
