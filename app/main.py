@@ -150,6 +150,17 @@ class RedisServer:
                     await self.send_string_response(writer, f"role:master\n"
                                                             f"master_replid:{self.replid}\n"
                                                             f"master_repl_offset:{self.repl_offset}")
+            elif command == "INCR":
+                key = data[1]
+                val = self.store.get(key, [0, None])[0]
+                if type(val) == int:
+                    print(val)
+                    if key in self.store:
+                        self.store[key][0] += 1
+                    else:
+                        self.store[key] = [1, None]
+                    await self.send_integer_response(writer, self.store[key][0])
+
             elif command == "REPLCONF":
                 if data[1] == "listening-port":
                     self.repl_ports[writer] = 0
@@ -346,7 +357,11 @@ class RedisServer:
                 end_time = time.time() + time_limit
             else:
                 end_time = None
-            self.store[key] = [value, end_time]
+            try:
+                value = int(value)
+                self.store[key] = [value, end_time]
+            except ValueError:
+                self.store[key] = [value, end_time]
         except Exception as e:
             logging.error(f"Failed to update store: {e}")
 
