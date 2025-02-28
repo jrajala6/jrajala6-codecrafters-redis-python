@@ -209,7 +209,10 @@ class RedisServer:
                 if data[1] == "block":
                     start = 4
                     timeout = int(data[2])
-                    await asyncio.sleep(timeout / 1000)
+                    if timeout == 0:
+                        await self.stream_event.wait()
+                    else:
+                        await asyncio.sleep(timeout / 1000)
                 else:
                     start = 2
                 num_keys = (len(data) - start) // 2
