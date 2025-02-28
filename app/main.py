@@ -210,6 +210,7 @@ class RedisServer:
                     start = 4
                     timeout = int(data[2])
                     if timeout == 0:
+                        self.stream_event.clear()
                         await self.stream_event.wait()
                     else:
                         await asyncio.sleep(timeout / 1000)
