@@ -248,7 +248,7 @@ class RedisServer:
                     await self.send_array_response(writer, output)
 
             elif command == "MULTI":
-                self.send_simple_response(writer, "+OK")
+                await self.send_simple_response(writer, "+OK")
 
 
     async def find_all_acks(self, num_replicas_expected, timeout_ms):
