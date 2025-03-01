@@ -625,14 +625,6 @@ class StreamEntry:
         output.append([item for key in stream_entry.contents() for item in (key, stream_entry.contents()[key])])
         return output
 
-
-
-
-
-
-
-
-
 if __name__ == "__main__":
     server = RedisServer()
     asyncio.run(server.start())
